@@ -1,0 +1,19 @@
+ausprobierte Modelle:
+
+- GeneZC/MiniChat-3B:
+
+    benutzt eine conversation library, die von pip nicht gefunden werden kann
+
+
+- Open-Orca/Mistral-7B-OpenOrca:
+
+    lädt das Modell schlicht weg bei mir nicht runter
+
+
+- gpt2-xl:
+
+    code klappt und Modell läuft, jedoch generiert es keine fragen zu dem 500 wörter text
+
+- flan-t5-large/flan-t5-xxl
+
+    large (783M) klappt bei meinem laptop, xxl (11B) gleiches problem wie bei OpenOrca. Liegt wahrscheinlich an den hohen Parameter. Scheint so, dass auf meinem Laptop (AMD Ryzen 4700u + amd integrierte gpu + 16gb RAM) nicht wirklich mehr als 3B Paramter schafft
