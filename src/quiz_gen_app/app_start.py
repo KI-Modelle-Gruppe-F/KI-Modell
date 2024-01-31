@@ -24,6 +24,3 @@ def app_start():
     # START
     st.title("Quiz Generator")
     st.sidebar.title("Quiz Generator Options")
-
-    st.sidebar.info(
-        'The quiz generation takes more time the more wrong answers you choose')
