@@ -43,6 +43,9 @@ class Question:
     def set_question(self, question):
         self.question = question
 
+    def get_wrong_answers(self):
+        return self.wrong_answers
+
     def add_wrong_answers(self, wrong_answer):
         self.wrong_answers.append(wrong_answer)
 
@@ -67,8 +70,7 @@ class Question:
 @st.cache_resource(show_spinner=False)
 def load_question_generation_model():
     # st.write('Loading question generation model...')
-    gq_model_name = "thangved/t5-generate-question"
-    # gq_model_name = "t5-gq"
+    gq_model_name = "thangved/t5-generate-question"  # 60.5M params
     ml = AutoModelForSeq2SeqLM.from_pretrained(gq_model_name)
     tr = AutoTokenizer.from_pretrained(gq_model_name)
     return ml, tr
@@ -77,7 +79,8 @@ def load_question_generation_model():
 @st.cache_resource(show_spinner=False)
 def load_question_answering_model():
     # st.write('Loading question answering model...')
-    qa_model_name = 'deepset/roberta-large-squad2'
+    # qa_model_name = 'deepset/roberta-large-squad2' # 354M params
+    qa_model_name = 'deepset/tinyroberta-squad2'  # 81.5M params
     ml = RobertaForQuestionAnswering.from_pretrained(qa_model_name)
     tr = AutoTokenizer.from_pretrained(qa_model_name)
     return ml, tr
@@ -86,7 +89,8 @@ def load_question_answering_model():
 @st.cache_resource(show_spinner=False)
 def load_wrong_answer_generation_model():
     # st.write('Loading wrong answer generation model...')
-    gwa_model_name = "google/flan-t5-large"
+    gwa_model_name = "google/flan-t5-large"  # 783M params
+    # gwa_model_name = "google/flan-t5-small"  # 77M params
     ml = T5ForConditionalGeneration.from_pretrained(gwa_model_name)
     tr = T5Tokenizer.from_pretrained(gwa_model_name)
     return ml, tr
@@ -99,13 +103,7 @@ def get_answer_outlet(p_question, num_wa):
     return [p_question.get_question(), answer_outlet, correct_answer_idx]
 
 
-# Load models and tokenizers
-gq_model, gq_tokenizer = load_question_generation_model()
-qa_model, qa_tokenizer = load_question_answering_model()
-gwa_model, gwa_tokenizer = load_wrong_answer_generation_model()
-
-
-def generate_questions(context, progress_bar):
+def generate_questions(m, t, context, progress_bar):
     # progress start
     progress_text = "Generating questions..."
     progress_bar.progress(0, text=progress_text)
@@ -116,60 +114,66 @@ def generate_questions(context, progress_bar):
     # msl = 512
     # gq_prompt = gq_prompt[:msl]
 
-    input_ids = gq_tokenizer(gq_prompt, return_tensors="pt").input_ids
+    input_ids = t(gq_prompt, return_tensors="pt").input_ids
 
     with torch.no_grad():
-        outputs = gq_model.generate(
+        outputs = m.generate(
             input_ids,
             do_sample=True,
-            temperature=1.1,
-            max_length=256,
-            num_beams=5,
-            early_stopping=True,
+            temperature=0.9,
+            max_length=512,
+            num_beams=3,
             no_repeat_ngram_size=5,
+            early_stopping=True,
         )
 
-    decoded_output = gq_tokenizer.decode(
+    decoded_output = t.decode(
         outputs[0], skip_special_tokens=True).strip()
     # print(decoded_output)
 
     generated_questions = decoded_output.split('Question:')
     generated_questions = [Question(question=question.strip(
     )) for question in generated_questions if question.strip() != ""]
+    # st.write('Questions generated')
 
     # progress finish
     # progress_value = 100/len(generated_questions)
     progress_value = 20
-    progress_bar.progress(progress_value, text=progress_text)
+    progress_bar.progress(
+        progress_value, text=f'{progress_text} {progress_value}%')
 
     return generated_questions
 
 
-def generate_answers(context, generated_questions, progress_bar):
+def generate_answers(m, t, context, generated_questions, progress_bar):
     # progress start
     progress_text = "Generating answers..."
     progress_bar.progress(20, text=progress_text)
+
+    if len(generated_questions) == 0:
+        raise Exception("No questions generated")
 
     questions = []
     st.write(len(generated_questions))
 
     for q_question in generated_questions:
-        inputs = qa_tokenizer(
+        # st.write('an answer was generated')
+        inputs = t(
             q_question.get_question(),
             context,
             return_tensors='pt',
-            max_length=512,
+            max_length=256,
             truncation=True
         )
 
         with torch.no_grad():
-            outputs = qa_model(**inputs, return_dict=True)
+            outputs = m(**inputs, return_dict=True)
 
         # Find start and end indices with highest logits
         start_idx = torch.argmax(outputs['start_logits']).item()
         end_idx = torch.argmax(outputs['end_logits']).item() + 1
 
-        answer = qa_tokenizer.decode(
+        answer = t.decode(
             inputs['input_ids'][0][start_idx:end_idx], skip_special_tokens=True)
         if answer.strip() != "":
             q_question.set_answer(answer.strip())
@@ -178,18 +182,19 @@ def generate_answers(context, generated_questions, progress_bar):
     # progress finish
     # progress_value = 100/len(generated_questions)
     progress_value = 40
-    progress_bar.progress(progress_value, text=progress_text)
+    progress_bar.progress(
+        progress_value, text=f'{progress_text} {progress_value}%')
 
     return questions
 
 
-def generate_wrong_answers(p_questions, num_wa, progress_bar):
+def generate_wrong_answers(m, t, context, p_questions, num_wa, progress_bar):
     # Progress Start
     progress_text = "Finalizing Quiz..."
     q_len = len(p_questions)
 
     if q_len == 0:
-        raise Exception("No questions generated")
+        q_len = 1
 
     # (remaining progress / number of questions) / number of wrong answers
     p_incr = int((60 / q_len) / num_wa)
@@ -198,32 +203,44 @@ def generate_wrong_answers(p_questions, num_wa, progress_bar):
     progress_bar.progress(progress, text=progress_text)
 
     for question in p_questions:
-        gwa_prompt = f'Question: {question.get_question()}\nGenerate a wrong answer'
+        # st.write(question)
+        # gwa_prompt = f'Generate a wrong answer\nQuestion: {question.get_question()}\nCorrect Answer: {question.get_answer()}\nContext: {context}'
 
         wrong_answers = []
+
+        exceptions = ''
+
+        # if len(wrong_answers) > 0:
+        #     wa = ', '.join(wrong_answers)
+        #     exceptions = f'not being {wa}'
+
+        gwa_prompt = f'Context:{context}\nQuestion: {question.get_question()}\nTask: Generate a wrong answer {exceptions}'
+
         for turn in range(num_wa):
-            input_ids = gwa_tokenizer(
+
+            # st.write(f'{turn} wrong answer generated')
+            input_ids = t(
                 gwa_prompt, return_tensors="pt").input_ids
 
             with torch.no_grad():
-                outputs = gwa_model.generate(
+                outputs = m.generate(
                     input_ids,
                     do_sample=True,
-                    temperature=2.5,
-                    no_repeat_ngram_size=4,
-                    num_beams=3,
-                    max_length=256,
-                    early_stopping=True,
+                    temperature=1.6,
+                    no_repeat_ngram_size=5,
+                    num_beams=1,
+                    max_length=128,
+                    # early_stopping=True,
                 )
 
-            decoded_output = gwa_tokenizer.decode(
+            decoded_output = t.decode(
                 outputs[0], skip_special_tokens=True).strip()
 
             progress += p_incr
 
             # Capitalize first letter and make other letters lowercase
-            decoded_output = decoded_output.capitalize(
-            ) if decoded_output[0].isupper() else decoded_output
+            output = decoded_output.capitalize(
+            ) if question.get_answer()[0].isupper() else decoded_output
 
             # Capitalizes all words, but makes other letters lowercase
             # decoded_output = string.capwords(
@@ -237,8 +254,9 @@ def generate_wrong_answers(p_questions, num_wa, progress_bar):
             # decoded_output = f'{decoded_output[0].upper()}{decoded_output[1:]}' if decoded_output[0].isupper(
             # ) else decoded_output
 
-            wrong_answers.append(decoded_output)
-            progress_bar.progress(progress, text=progress_text)
+            wrong_answers.append(output)
+            progress_bar.progress(
+                progress, text=f'{progress_text} {progress}%')
 
         question.set_wrong_answers(wrong_answers)
         question.set_answer_outlet(get_answer_outlet(question, num_wa))

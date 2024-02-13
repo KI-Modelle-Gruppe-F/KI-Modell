@@ -1,11 +1,21 @@
 import streamlit_book as stb
 import streamlit as st
 import time
-from models import generate_answers, generate_questions, generate_wrong_answers
 from app_start import app_start
+from models import generate_answers, generate_questions, generate_wrong_answers, load_question_generation_model, load_question_answering_model, load_wrong_answer_generation_model
 
 # Render App architecture
 app_start()
+
+gq_model, gq_tokenizer = None, None
+qa_model, qa_tokenizer = None, None
+gwa_model, gwa_tokenizer = None, None
+
+# Load models and tokenizers
+with st.spinner('Loading models...'):
+    gq_model, gq_tokenizer = load_question_generation_model()
+    qa_model, qa_tokenizer = load_question_answering_model()
+    gwa_model, gwa_tokenizer = load_wrong_answer_generation_model()
 
 # Streamlit app
 # Initialize session state
@@ -21,7 +31,13 @@ if 'num_wrong_answers' not in st.session_state:
 
 def toggle_state(state):
     st.session_state.current_state = state
-    # st.experimental_rerun()
+    # st.rerun()
+
+
+def hgc(s, i, n):
+    st.session_state.prompt = i
+    st.session_state.num_wrong_answers = n
+    toggle_state(s)
 
 
 # Input text state
@@ -34,11 +50,12 @@ if st.session_state.current_state == 'input':
 
     st.sidebar.info(
         'The quiz generation takes more time the more wrong answers you choose')
-    st.session_state.num_wrong_answers = st.sidebar.slider(
+
+    num_wrong_answers = st.sidebar.slider(
         "Number of wrong answers", 1, 5, st.session_state.num_wrong_answers)
 
     # Generate questions button
-    if st.button("Generate Quiz", key='toggle_option_button', on_click=lambda: toggle_state('generation'), use_container_width=True):
+    if st.button("Generate Quiz", key='toggle_option_button', on_click=lambda: hgc('generation', prompt_context, num_wrong_answers), use_container_width=True):
         if prompt_context != '':
             st.session_state.prompt = prompt_context
         else:
@@ -52,15 +69,20 @@ elif st.session_state.current_state == 'generation':
         prompt_context = st.session_state.prompt
         num_wrong_answers = st.session_state.num_wrong_answers
 
+        # print(prompt_context)
+        # st.write(f'the context: {prompt_context}')
+
         # generate questions
         gp_bar = st.progress(0, text="Initializing Quiz...")
 
-        questions = generate_questions(prompt_context, gp_bar)
+        questions = generate_questions(
+            gq_model, gq_tokenizer, prompt_context, gp_bar)
 
-        questions_array = generate_answers(prompt_context, questions, gp_bar)
+        questions_array = generate_answers(
+            qa_model, qa_tokenizer, prompt_context, questions, gp_bar)
 
         st.session_state.quiz = generate_wrong_answers(
-            questions_array, num_wrong_answers, gp_bar)
+            gwa_model, gwa_tokenizer, prompt_context, questions_array, num_wrong_answers, gp_bar)
 
         gp_bar.progress(100, text="Quiz finalized")
         time.sleep(0.5)
@@ -72,19 +94,26 @@ elif st.session_state.current_state == 'generation':
         # st.write(str(e))
         st.write(e)
         if str(e) == "No questions generated":
-            st.toast(
-                "Whoops, the App didn't find any Question..   . Try again please", icon='😓')
             toggle_state('input')
+            st.toast(
+                "Whoops, the App didn't find any Question... Try again please, maybe with a longer text", icon='😓')
+            time.sleep(2)
+            # st.rerun()
         else:
-            st.toast(
-                "There was an error generating your quiz. Try again please, maybe with a longer text", icon='😓')
             toggle_state('input')
+            st.toast(
+                "There was an error generating your quiz. Try again please", icon='😓')
+            time.sleep(2)
+            # st.rerun()
 
 
 # Display quiz questions
 if st.session_state.current_state == 'display':
     for question in st.session_state.quiz:
         q, a, c = question.get_answer_outlet_parts()
+        # st.write(q)
+        # st.write(a)
+        # st.write(c)
         stb.single_choice(q, a, c)
 
     st.markdown('<span style="display: flex;height: 50px;"></span>',
