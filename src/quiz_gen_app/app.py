@@ -1,10 +1,10 @@
-from models import generate_answers, generate_questions, generate_wrong_answers
-import time
-import streamlit as st
 import streamlit_book as stb
-
-# Start of App Notice
+import streamlit as st
+import time
+from models import generate_answers, generate_questions, generate_wrong_answers
 from app_start import app_start
+
+# Render App architecture
 app_start()
 
 # Streamlit app
@@ -21,6 +21,7 @@ if 'num_wrong_answers' not in st.session_state:
 
 def toggle_state(state):
     st.session_state.current_state = state
+    # st.experimental_rerun()
 
 
 # Input text state
@@ -30,6 +31,9 @@ if st.session_state.current_state == 'input':
 
     prompt_context = st.text_area(
         "Enter the Text:", value=st.session_state.prompt, height=300)
+
+    st.sidebar.info(
+        'The quiz generation takes more time the more wrong answers you choose')
     st.session_state.num_wrong_answers = st.sidebar.slider(
         "Number of wrong answers", 1, 5, st.session_state.num_wrong_answers)
 
@@ -43,7 +47,7 @@ if st.session_state.current_state == 'input':
 
 # Display Quiz state
 elif st.session_state.current_state == 'generation':
-    st.empty()
+    # st.empty()
     try:
         prompt_context = st.session_state.prompt
         num_wrong_answers = st.session_state.num_wrong_answers
@@ -53,8 +57,7 @@ elif st.session_state.current_state == 'generation':
 
         questions = generate_questions(prompt_context, gp_bar)
 
-        questions_array = generate_answers(
-            prompt_context, questions, gp_bar)
+        questions_array = generate_answers(prompt_context, questions, gp_bar)
 
         st.session_state.quiz = generate_wrong_answers(
             questions_array, num_wrong_answers, gp_bar)
@@ -67,6 +70,7 @@ elif st.session_state.current_state == 'generation':
         toggle_state('display')
     except Exception as e:
         # st.write(str(e))
+        st.write(e)
         if str(e) == "No questions generated":
             st.toast(
                 "Whoops, the App didn't find any Question..   . Try again please", icon='😓')

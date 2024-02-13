@@ -1,7 +1,7 @@
 # imports
 import random
-import string
-import math
+# import string
+# import math
 import torch
 import streamlit as st
 from transformers import AutoModelForSeq2SeqLM, RobertaForQuestionAnswering, T5ForConditionalGeneration, AutoTokenizer, T5Tokenizer
@@ -68,27 +68,28 @@ class Question:
 def load_question_generation_model():
     # st.write('Loading question generation model...')
     gq_model_name = "thangved/t5-generate-question"
-    return AutoModelForSeq2SeqLM.from_pretrained(gq_model_name), AutoTokenizer.from_pretrained(gq_model_name)
+    # gq_model_name = "t5-gq"
+    ml = AutoModelForSeq2SeqLM.from_pretrained(gq_model_name)
+    tr = AutoTokenizer.from_pretrained(gq_model_name)
+    return ml, tr
 
 
 @st.cache_resource(show_spinner=False)
 def load_question_answering_model():
     # st.write('Loading question answering model...')
     qa_model_name = 'deepset/roberta-large-squad2'
-    return RobertaForQuestionAnswering.from_pretrained(qa_model_name), AutoTokenizer.from_pretrained(qa_model_name)
+    ml = RobertaForQuestionAnswering.from_pretrained(qa_model_name)
+    tr = AutoTokenizer.from_pretrained(qa_model_name)
+    return ml, tr
 
 
 @st.cache_resource(show_spinner=False)
 def load_wrong_answer_generation_model():
     # st.write('Loading wrong answer generation model...')
     gwa_model_name = "google/flan-t5-large"
-    return T5ForConditionalGeneration.from_pretrained(gwa_model_name), T5Tokenizer.from_pretrained(gwa_model_name)
-
-
-with st.spinner("Initializing models..."):
-    gq_model, gq_tokenizer = load_question_generation_model()
-    qa_model, qa_tokenizer = load_question_answering_model()
-    gwa_model, gwa_tokenizer = load_wrong_answer_generation_model()
+    ml = T5ForConditionalGeneration.from_pretrained(gwa_model_name)
+    tr = T5Tokenizer.from_pretrained(gwa_model_name)
+    return ml, tr
 
 
 def get_answer_outlet(p_question, num_wa):
@@ -96,6 +97,12 @@ def get_answer_outlet(p_question, num_wa):
     answer_outlet = [q for q in p_question.get_wrong_answers()]
     answer_outlet.insert(correct_answer_idx, p_question.get_answer())
     return [p_question.get_question(), answer_outlet, correct_answer_idx]
+
+
+# Load models and tokenizers
+gq_model, gq_tokenizer = load_question_generation_model()
+qa_model, qa_tokenizer = load_question_answering_model()
+gwa_model, gwa_tokenizer = load_wrong_answer_generation_model()
 
 
 def generate_questions(context, progress_bar):
@@ -115,7 +122,7 @@ def generate_questions(context, progress_bar):
         outputs = gq_model.generate(
             input_ids,
             do_sample=True,
-            temperature=0.9,
+            temperature=1.1,
             max_length=256,
             num_beams=5,
             early_stopping=True,
@@ -124,10 +131,11 @@ def generate_questions(context, progress_bar):
 
     decoded_output = gq_tokenizer.decode(
         outputs[0], skip_special_tokens=True).strip()
+    # print(decoded_output)
 
     generated_questions = decoded_output.split('Question:')
-    generated_questions = [Question(question=g_question.strip(
-    )) for g_question in generated_questions if g_question.strip() != ""]
+    generated_questions = [Question(question=question.strip(
+    )) for question in generated_questions if question.strip() != ""]
 
     # progress finish
     # progress_value = 100/len(generated_questions)
@@ -143,6 +151,7 @@ def generate_answers(context, generated_questions, progress_bar):
     progress_bar.progress(20, text=progress_text)
 
     questions = []
+    st.write(len(generated_questions))
 
     for q_question in generated_questions:
         inputs = qa_tokenizer(
